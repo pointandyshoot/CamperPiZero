@@ -47,7 +47,7 @@ This reconnect-focused harness deliberately reuses the three already-tested virt
 
 The mobile dashboard will use small local HTML/CSS/JavaScript files, prioritising AC control, BLUETTI SOC and solar input. History is a separate lightweight view. SQLite with bounded multi-resolution summaries is selected: one-minute samples for 14 days, five-minute summaries for 90 days and hourly summaries for two years, subject to real measurements. Preserve min/max and gaps; cap graph responses; retain command events separately. No additional database server.
 
-Queued networking change: try Starlink immediately at boot; check visibility roughly every minute from Camper-HA when the driver permits AP-mode scans; validate association/DHCP/local gateway before staying on Starlink; restore AP after failed trials and back off disruptive reassociation. Driver behaviour must be tested before applying frequent scans.
+Available [networking patch](networking/README.md): try Starlink immediately at boot; check visibility roughly every minute from Camper-HA when the driver permits AP-mode scans; validate association/DHCP/local gateway before staying on Starlink; restore AP after failed trials and back off disruptive reassociation. Driver behaviour must be tested before applying frequent scans.
 
 Meshtastic and optional 433 MHz receiver support follow stable core monitoring. An absent SDR will not block startup. ADS-B is deferred.
 

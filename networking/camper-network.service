@@ -1,0 +1,28 @@
+[Unit]
+Description=Camper single-radio AP/Starlink controller
+Wants=NetworkManager.service camper-dhcp.service avahi-daemon.service
+Requires=camper-activate.service
+After=NetworkManager.service camper-dhcp.service camper-activate.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/python3 /usr/local/lib/camper-ha/controller.py
+ExecStopPost=/usr/bin/python3 /usr/local/lib/camper-ha/controller.py --force-ap
+Restart=always
+RestartSec=15
+WatchdogSec=180
+# Allow bounded association, configured stability dwell and AP recovery.
+TimeoutStartSec=360
+TimeoutStopSec=70
+KillMode=control-group
+OOMScoreAdjust=-500
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
