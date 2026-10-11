@@ -1,0 +1,14 @@
+*.local.json
+devices.json
+results/
+*.jsonl
+*.sqlite*
+*.db*
+.env
+secrets.yaml
+__pycache__/
+*.pyc
+.venv/
+venv/
+bms-venv/
+aranet-venv/
