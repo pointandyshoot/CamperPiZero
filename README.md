@@ -52,3 +52,9 @@ Available [networking patch](networking/README.md): try Starlink immediately at 
 Meshtastic and optional 433 MHz receiver support follow stable core monitoring. An absent SDR will not block startup. ADS-B is deferred.
 
 See [upstream credits](docs/CREDITS.md). No private device identifiers, credentials, locations or runtime data belong in this repository.
+
+## BLUETTI diagnostic follow-up
+
+The initial 30-minute fresh-process run had 19 successful BLUETTI reads and two failures, while SmartBat and Aranet each completed 23 reads without failure. Minimum host available memory was about 221 MiB; this is encouraging headroom, not a persistent-process benchmark. BLUETTI recovered without intervention. One failure ended before the network patch began, so both failures cannot be attributed to that update. Exception-class-only logging could not establish the precise causes.
+
+The revised harness allows a 12-second BLUETTI discovery window, passes the discovered BLEDevice directly to the pinned upstream client (avoiding Bleak's implicit second scan), and exits failed sessions instead of letting upstream reconnect with old encryption state. Private results now distinguish discovery, connect, handshake, read and validation stages; fixed failure codes are included without printing upstream messages or encryption keys. These changes need another hardware run. See [Bleak's client guidance](https://bleak.readthedocs.io/en/latest/api/client.html).

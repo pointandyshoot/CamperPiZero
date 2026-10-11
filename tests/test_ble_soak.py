@@ -1,3 +1,7 @@
+import asyncio
+import contextlib
+import io
+from types import SimpleNamespace
 import importlib.util
 import json
 from pathlib import Path
@@ -52,5 +56,49 @@ class Tests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertEqual(result['error'],'worker_exit')
         self.assertNotIn('private',json.dumps(result))
+
+    def test_failure_stage_and_safe_code(self):
+        async def fail(config, progress):
+            progress['stage']='discovery'
+            raise soak.ReadFailure('device_not_found')
+        output=io.StringIO()
+        with patch.object(soak,'read_bluetti',fail),contextlib.redirect_stdout(output):
+            soak.worker_main('bluetti',{})
+        result=json.loads(output.getvalue())
+        self.assertEqual(result['stage'],'discovery')
+        self.assertEqual(result['error_code'],'device_not_found')
+
+    def test_bluetti_uses_scanned_device_and_clean_single_session(self):
+        record_device=object(); instances=[]
+        class Scanner:
+            @staticmethod
+            async def discover(**kwargs):
+                return {'record':(SimpleNamespace(address='00:00:00:00:00:01'),SimpleNamespace(manufacturer_data={}))}
+        discovered=SimpleNamespace(address='00:00:00:00:00:01')
+        async def scan(**kwargs):return {'record':(discovered,SimpleNamespace(manufacturer_data={}))}
+        Scanner.discover=staticmethod(scan)
+        class Client:
+            def __init__(self,target,encrypted):
+                self.target=target;self.is_ready=False;self.client=SimpleNamespace(is_connected=False);self.closed=False;instances.append(self)
+            async def run(self):
+                try:
+                    self.is_ready=True
+                    await asyncio.Event().wait()
+                finally:self.closed=True
+            async def perform(self,command):
+                future=asyncio.get_running_loop().create_future();future.set_result(b'raw');return future
+        class Command:
+            def __init__(self,*args):self.function_code=3
+            def parse_response(self,response):return response
+        class Device:
+            def __init__(self,*args):pass
+            def parse(self,*args):return {'total_battery_percent':78,'dc_input_power':92,'ac_input_power':0,'ac_output_power':0,'dc_output_power':19,'ctrl_status':4}
+        fake={'bleak':SimpleNamespace(BleakScanner=Scanner),'bluetti_mqtt.bluetooth':SimpleNamespace(BluetoothClient=Client),'bluetti_mqtt.bluetooth.encryption':SimpleNamespace(is_device_using_encryption=lambda _:True),'bluetti_mqtt.core':SimpleNamespace(V2Device=Device,ReadHoldingRegisters=Command)}
+        with patch.dict(sys.modules,fake):
+            result=asyncio.run(soak.read_bluetti({'bluetti_mac':discovered.address},{}))
+        self.assertIs(instances[0].target,discovered)
+        self.assertTrue(instances[0].closed)
+        self.assertEqual(result['soc_percent'],78)
+        with self.assertRaises(soak.ReadFailure):asyncio.run(instances[0]._disconnect())
 
 if __name__=='__main__': unittest.main()

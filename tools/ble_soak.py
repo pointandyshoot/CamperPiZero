@@ -20,6 +20,13 @@ DEVICES = ("bluetti", "smartbat", "aranet")
 WORKER_LIMIT = {"bluetti": 75, "smartbat": 65, "aranet": 35}
 
 
+class ReadFailure(RuntimeError):
+    """Failure code is one of our fixed labels, never an upstream message."""
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
 def memory():
     values = {}
     for line in Path("/proc/meminfo").read_text().splitlines():
@@ -66,26 +73,38 @@ def validate(device, data):
     return data
 
 
-async def read_bluetti(config):
+async def read_bluetti(config, progress):
     from bleak import BleakScanner
     from bluetti_mqtt.bluetooth import BluetoothClient
     from bluetti_mqtt.bluetooth.encryption import is_device_using_encryption
     from bluetti_mqtt.core import V2Device, ReadHoldingRegisters
     address = config["bluetti_mac"].upper()
-    found = await BleakScanner.discover(timeout=8, return_adv=True)
+    progress["stage"] = "discovery"
+    found = await BleakScanner.discover(timeout=12, return_adv=True)
     record = next((r for r in found.values() if r[0].address.upper() == address), None)
     if record is None:
-        raise RuntimeError("device_not_found")
-    client = BluetoothClient(address, is_device_using_encryption(record[1].manufacturer_data))
+        raise ReadFailure("device_not_found")
+
+    class SingleSessionClient(BluetoothClient):
+        async def _disconnect(self):
+            # Upstream run()'s finally performs disconnection. Do not let its
+            # reconnect loop reuse established encryption keys/ready events.
+            raise ReadFailure("session_lost")
+
+    # Pinned upstream passes this argument directly to BleakClient. Use the
+    # discovered BLEDevice, not its address, to avoid another implicit scan.
+    client = SingleSessionClient(record[0], is_device_using_encryption(record[1].manufacturer_data))
     device = V2Device(address, "0", "Elite 200 V2")
     worker = asyncio.create_task(client.run())
     try:
         while not client.is_ready:
+            progress["stage"] = "handshake" if client.client.is_connected else "connect"
             if worker.done():
                 await worker
-                raise RuntimeError("worker_stopped")
+                raise ReadFailure("worker_stopped")
             await asyncio.sleep(.2)
         command = ReadHoldingRegisters(100, 67)
+        progress["stage"] = "read"
         assert command.function_code == 3  # No device configuration/output writes.
         response = await asyncio.wait_for(await client.perform(command), timeout=20)
         data = device.parse(100, command.parse_response(response))
@@ -101,13 +120,16 @@ async def read_bluetti(config):
             await asyncio.wait_for(worker, timeout=5)
 
 
-async def read_smartbat(config):
+async def read_smartbat(config, progress):
     from bleak import BleakScanner
     from aiobmsble.bms.ogt_bms import BMS
+    progress["stage"] = "discovery"
     device = await BleakScanner.find_device_by_address(config["smartbat_mac"], timeout=12)
     if device is None:
-        raise RuntimeError("device_not_found")
+        raise ReadFailure("device_not_found")
+    progress["stage"] = "connect"
     async with BMS(ble_device=device) as bms:
+        progress["stage"] = "read"
         data = await bms.async_update()
     return {"soc_percent": data.get("battery_level"), "voltage_v": data.get("voltage"),
             "current_a": data.get("current"), "power_w": data.get("power"),
@@ -115,10 +137,11 @@ async def read_smartbat(config):
             "problem": data.get("problem"), "runtime_seconds": data.get("runtime")}
 
 
-async def read_aranet(config):
+async def read_aranet(config, progress):
     from bleak import BleakScanner
     from aranet4.client import Aranet4Advertisement
     ready, result = asyncio.Event(), {}
+    progress["stage"] = "advertisements"
 
     def receive(device, advertisement):
         if (advertisement.local_name or device.name or "") != config["aranet_name"]:
@@ -144,12 +167,16 @@ async def read_aranet(config):
 
 def worker_main(device, config):
     logging.disable(logging.CRITICAL)  # Upstream BLUETTI logs can contain session keys.
+    progress = {"stage": "import"}
     try:
         function = {"bluetti": read_bluetti, "smartbat": read_smartbat, "aranet": read_aranet}[device]
-        data = asyncio.run(asyncio.wait_for(function(config), timeout=WORKER_LIMIT[device] - 10))
+        data = asyncio.run(asyncio.wait_for(function(config, progress), timeout=WORKER_LIMIT[device] - 10))
+        progress["stage"] = "validate"
         payload = {"ok": True, "data": validate(device, data)}
     except Exception as exc:
-        payload = {"ok": False, "error": type(exc).__name__}  # Never print raw packets/keys/IDs.
+        payload = {"ok": False, "error": type(exc).__name__, "stage": progress["stage"]}
+        if isinstance(exc, ReadFailure):
+            payload["error_code"] = exc.code
     payload["peak_kib"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     payload["versions"] = {}
     for package in ("bleak", "aiobmsble", "aranet4"):
@@ -273,7 +300,7 @@ def supervise(args, config_path, base):
                        "duration_seconds": elapsed, **result, "memory": host}
                 log.write(json.dumps(row) + "\n")
                 log.flush()
-                status = "OK" if result.get("ok") else "FAIL " + result.get("error", "unknown")
+                status = "OK" if result.get("ok") else "FAIL " + result.get("error", "unknown") + "/" + result.get("stage", "supervisor")
                 print(f"{device}: {status} ({elapsed}s); available={host['available_kib']//1024} MiB; "
                       f"swap={host['swap_used_kib']//1024} MiB", flush=True)
                 time.sleep(min(2, max(0, end - time.monotonic())))
