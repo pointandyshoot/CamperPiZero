@@ -97,6 +97,12 @@ class Tests(unittest.TestCase):
         with patch.dict(sys.modules,fake):
             result=asyncio.run(soak.read_bluetti({'bluetti_mac':discovered.address},{}))
         self.assertIs(instances[0].target,discovered)
+        count=len(instances)
+        with patch.dict(sys.modules,fake):
+            with self.assertRaises(soak.ReadFailure) as error:
+                asyncio.run(soak.read_bluetti({'bluetti_mac':discovered.address,'bluetti_name':'Elite 200 V20000000000000'},{}))
+        self.assertEqual(error.exception.code,'identity_mismatch')
+        self.assertEqual(len(instances),count)
         self.assertTrue(instances[0].closed)
         self.assertEqual(result['soc_percent'],78)
         with self.assertRaises(soak.ReadFailure):asyncio.run(instances[0]._disconnect())

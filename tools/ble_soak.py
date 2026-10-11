@@ -46,6 +46,10 @@ def config_check(config):
             raise ValueError(f"Missing or invalid {key} in private configuration")
     if not config.get("aranet_name", "").startswith("Aranet4"):
         raise ValueError("Set aranet_name to the name shown by your scan")
+    name = config.get("bluetti_name")
+    if name is not None and (not isinstance(name, str) or not name.startswith("Elite 200 V2")
+                             or len(name) > 64 or any(ord(c) < 32 for c in name)):
+        raise ValueError("Invalid bluetti_name in private configuration")
 
 
 def finite(value, low, high):
@@ -84,6 +88,10 @@ async def read_bluetti(config, progress):
     record = next((r for r in found.values() if r[0].address.upper() == address), None)
     if record is None:
         raise ReadFailure("device_not_found")
+    expected_name = config.get("bluetti_name")
+    actual_name = getattr(record[1], "local_name", None) or getattr(record[0], "name", None)
+    if expected_name is not None and actual_name != expected_name:
+        raise ReadFailure("identity_mismatch")
 
     class SingleSessionClient(BluetoothClient):
         async def _disconnect(self):
