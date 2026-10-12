@@ -12,3 +12,8 @@ __pycache__/
 venv/
 bms-venv/
 aranet-venv/
+config.json
+private/
+backups/
+*.tar.gz
+*-requirements.txt

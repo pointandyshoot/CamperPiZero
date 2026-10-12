@@ -42,9 +42,9 @@ def config_check(config):
     if not isinstance(config, dict):
         raise ValueError("Private configuration must be an object")
     for key in ("bluetti_mac", "smartbat_mac"):
-        if not re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", config.get(key, "")):
+        if not isinstance(config.get(key),str) or not re.fullmatch(r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", config[key]):
             raise ValueError(f"Missing or invalid {key} in private configuration")
-    if not config.get("aranet_name", "").startswith("Aranet4"):
+    if not isinstance(config.get("aranet_name"),str) or not config["aranet_name"].startswith("Aranet4"):
         raise ValueError("Set aranet_name to the name shown by your scan")
     name = config.get("bluetti_name")
     if name is not None and (not isinstance(name, str) or not name.startswith("Elite 200 V2")
@@ -77,7 +77,9 @@ def validate(device, data):
     return data
 
 
-async def read_bluetti(config, progress):
+async def read_bluetti(config, progress, desired_ac=None):
+    if desired_ac is not None and type(desired_ac) is not bool:
+        raise ValueError("AC state must be boolean")
     from bleak import BleakScanner
     from bluetti_mqtt.bluetooth import BluetoothClient
     from bluetti_mqtt.bluetooth.encryption import is_device_using_encryption
@@ -111,17 +113,42 @@ async def read_bluetti(config, progress):
                 await worker
                 raise ReadFailure("worker_stopped")
             await asyncio.sleep(.2)
-        command = ReadHoldingRegisters(100, 67)
-        progress["stage"] = "read"
-        assert command.function_code == 3  # No device configuration/output writes.
-        response = await asyncio.wait_for(await client.perform(command), timeout=20)
-        data = device.parse(100, command.parse_response(response))
-        status = data.get("ctrl_status")
-        return {"soc_percent": data.get("total_battery_percent"),
-                "solar_w": data.get("dc_input_power"), "ac_input_w": data.get("ac_input_power"),
-                "ac_output_w": data.get("ac_output_power"), "dc_output_w": data.get("dc_output_power"),
-                "ac_on": bool(status & 2) if status is not None else None,
-                "dc_on": bool(status & 4) if status is not None else None}
+        async def read_status():
+            command = ReadHoldingRegisters(100, 67)
+            progress["stage"] = "read"
+            assert command.function_code == 3
+            response = await asyncio.wait_for(await client.perform(command), timeout=15)
+            data = device.parse(100, command.parse_response(response))
+            status = data.get("ctrl_status")
+            return {"soc_percent": data.get("total_battery_percent"),
+                    "solar_w": data.get("dc_input_power"), "ac_input_w": data.get("ac_input_power"),
+                    "ac_output_w": data.get("ac_output_power"), "dc_output_w": data.get("dc_output_power"),
+                    "ac_on": bool(status & 2) if status is not None else None,
+                    "dc_on": bool(status & 4) if status is not None else None}
+
+        data = await read_status()
+        validate("bluetti", data)
+        if desired_ac is not None:
+            if type(data.get("ac_on")) is not bool:
+                raise ReadFailure("ac_state_unknown")
+            if data["ac_on"] != desired_ac:
+                from bluetti_mqtt.core import WriteSingleRegister
+                command = WriteSingleRegister(2011, int(desired_ac))
+                progress["stage"] = "ac_write"
+                response = await asyncio.wait_for(await client.perform(command), timeout=10)
+                if bytes(response) != bytes(command):
+                    raise ReadFailure("ac_ack_mismatch")
+                # One write only; failures are never automatically replayed.
+                for _ in range(3):
+                    await asyncio.sleep(1)
+                    data = await read_status()
+                    validate("bluetti", data)
+                    if data.get("ac_on") is desired_ac:
+                        break
+                else:
+                    raise ReadFailure("ac_readback_mismatch")
+            data["command_confirmed"] = True
+        return data
     finally:
         worker.cancel()
         with contextlib.suppress(asyncio.CancelledError):
