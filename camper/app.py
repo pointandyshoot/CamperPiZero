@@ -23,6 +23,9 @@ from camper.history import History
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from ble_soak import config_check, validate, memory, WORKER_LIMIT
 
+THEME_ASSETS=Path('/etc/camper-zero/theme-assets')
+ARTWORK_FILES={'power':'power.webp','solar':'solar.webp','air':'air.webp'}
+
 METRICS = {'bluetti.soc_percent','bluetti.solar_w','bluetti.ac_input_w','bluetti.ac_output_w',
            'bluetti.dc_output_w','smartbat.soc_percent','smartbat.voltage_v','smartbat.current_a',
            'smartbat.power_w','smartbat.temperature_c','aranet.co2_ppm','aranet.temperature_c',
@@ -177,6 +180,7 @@ class Core:
         return {'devices':devices,'active':self.active,'jobs':jobs,'clock_synchronised':self.clock_trusted,
                 'system':{**host,'load':os.getloadavg()[0],'temperature_c':temperature,'disk_free_gb':round(disk.free/1e9,1),
                           'uptime_seconds':int(time.monotonic()-self.started)},
+                'theme_artwork_available':[key for key,name in ARTWORK_FILES.items() if (THEME_ASSETS/name).is_file()],
                 'theme_labels':self.cfg.get('theme_labels',{'camper':'Camper','rose':'Rose','cyberpunk':'Cyberpunk'})}
 
     def authenticate(self,password,address):
@@ -242,6 +246,11 @@ class Handler(BaseHTTPRequestHandler):
             mime={'index.html':'text/html; charset=utf-8','style.css':'text/css; charset=utf-8','app.js':'text/javascript; charset=utf-8'}[name]
             return self.send(200,(Path(__file__).resolve().parents[1]/'web'/name).read_bytes(),mime)
         if not core.authorised(self.headers.get('Cookie')):return self.send(401,{'error':'Sign in required'})
+        if path.startswith('/theme-assets/'):
+            filename=path.removeprefix('/theme-assets/')
+            if filename not in ARTWORK_FILES.values():return self.send(404,{'error':'Not found'})
+            try:return self.send(200,(THEME_ASSETS/filename).read_bytes(),'image/webp')
+            except OSError:return self.send(404,{'error':'Artwork not installed'})
         if path=='/api/status':return self.send(200,core.snapshot())
         if path=='/api/history':
             query=parse_qs(urlsplit(self.path).query)

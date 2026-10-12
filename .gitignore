@@ -17,3 +17,6 @@ private/
 backups/
 *.tar.gz
 *-requirements.txt
+
+theme-assets/
+private-theme*/

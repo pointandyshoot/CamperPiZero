@@ -97,9 +97,16 @@ class CoreTests(unittest.TestCase):
         try:
             conn.request('GET','/api/status');response=conn.getresponse();self.assertEqual(response.status,401);response.read()
             body=json.dumps({'password':'fake-example-password'});headers={'Content-Type':'application/json','Origin':'http://'+host}
+            conn.request('GET','/theme-assets/power.webp');response=conn.getresponse();self.assertEqual(response.status,401);response.read()
             conn.request('POST','/api/login',body,headers);response=conn.getresponse();self.assertEqual(response.status,200);cookie=response.getheader('Set-Cookie').split(';')[0];response.read();headers['Cookie']=cookie
             conn.request('GET','/api/status',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,200);snapshot=json.loads(response.read());self.assertEqual(set(snapshot['devices']),{'bluetti','smartbat','aranet'})
             conn.request('POST','/api/ac','{"on":true}',{**headers,'Origin':'http://other.example'});response=conn.getresponse();self.assertEqual(response.status,403);response.read()
+            with patch('camper.app.THEME_ASSETS',self.path/'art'):
+                art=self.path/'art';art.mkdir();(art/'power.webp').write_bytes(b'example-webp')
+                self.assertEqual(self.core.snapshot()['theme_artwork_available'],['power'])
+                conn.request('GET','/theme-assets/power.webp',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,200);self.assertEqual(response.getheader('Content-Type'),'image/webp');self.assertEqual(response.read(),b'example-webp')
+                conn.request('GET','/theme-assets/../config.json',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,404);response.read()
+                conn.request('GET','/theme-assets/air.webp',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/dc','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/ac','{"on":true}',headers);response=conn.getresponse();self.assertEqual(response.status,202);self.assertEqual(json.loads(response.read())['status'],'queued')
             conn.request('POST','/api/ac','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,409);response.read()
