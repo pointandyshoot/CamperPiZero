@@ -1,8 +1,23 @@
 # CamperPiZero
 
-Local BLE camper monitoring for Raspberry Pi Zero 2 W / Raspberry Pi OS Lite ARM64. Initial phase: compatibility and reliability testing. Home Assistant and Docker are not required.
+Local BLE camper monitoring for Raspberry Pi Zero 2 W / Raspberry Pi OS Lite ARM64. First live release: mobile dashboard, local BLE monitoring, AC control and SQLite history. Home Assistant and Docker are not required.
 
 Confirmed short hardware tests: BLUETTI Elite 200 V2 encrypted local telemetry and AC on/off with read-back; SmartBat read-only telemetry; Aranet4 CO₂, temperature, humidity, pressure and battery from advertisements. Offline BLE operation is expected from the code but not yet physically tested. Runtime estimation, simultaneous operation, long-term memory behaviour and Wi-Fi/BLE coexistence remain under test.
+
+## Install the live dashboard
+
+On the already-tested Pi, run:
+
+```bash
+cd ~/CamperPiZero
+git pull --ff-only
+sudo python3 tools/install.py --check
+sudo python3 tools/install.py
+```
+
+Open **http://homeassistant.local:8080** or **http://192.168.42.1:8080** on the camper AP. Enter the dashboard password chosen during installation. The existing BLE environments and networking are preserved; no package changes/downloads occur. AC commands have priority and require read-back. DC shutdown is protected. Camper, Rose and Cyberpunk themes work locally; personal labels can be set in private configuration. No SDR is required.
+
+Read [installation and real-hardware acceptance](docs/INSTALL.md), [operation, updates and private backups](docs/OPERATIONS.md), and the [database decision](docs/DATABASE.md). Meshtastic is the next hardware-tested stage.
 
 ## Thirty-minute read-only test
 
@@ -45,7 +60,7 @@ This reconnect-focused harness deliberately reuses the three already-tested virt
 
 ## Direction
 
-The mobile dashboard will use small local HTML/CSS/JavaScript files, prioritising AC control, BLUETTI SOC and solar input. History is a separate lightweight view. SQLite with bounded multi-resolution summaries is selected: one-minute samples for 14 days, five-minute summaries for 90 days and hourly summaries for two years, subject to real measurements. Preserve min/max and gaps; cap graph responses; retain command events separately. No additional database server.
+The mobile dashboard uses small local HTML/CSS/JavaScript files, prioritising AC control, BLUETTI SOC and solar input. History is a separate lightweight view. SQLite with bounded multi-resolution summaries is selected: one-minute samples for 14 days, five-minute summaries for 90 days and hourly summaries for two years, subject to real measurements. Preserve min/max and gaps; cap graph responses; retain command events separately. No additional database server.
 
 Available [networking patch](networking/README.md): try Starlink immediately at boot; check visibility roughly every minute from Camper-HA when the driver permits AP-mode scans; validate association/DHCP/local gateway before staying on Starlink; restore AP after failed trials and back off disruptive reassociation. Driver behaviour must be tested before applying frequent scans.
 
@@ -57,6 +72,6 @@ See [upstream credits](docs/CREDITS.md). No private device identifiers, credenti
 
 The initial 30-minute fresh-process run had 19 successful BLUETTI reads and two failures, while SmartBat and Aranet each completed 23 reads without failure. Minimum host available memory was about 221 MiB; this is encouraging headroom, not a persistent-process benchmark. BLUETTI recovered without intervention. One failure ended before the network patch began, so both failures cannot be attributed to that update. Exception-class-only logging could not establish the precise causes.
 
-The revised harness allows a 12-second BLUETTI discovery window, passes the discovered BLEDevice directly to the pinned upstream client (avoiding Bleak's implicit second scan), and exits failed sessions instead of letting upstream reconnect with old encryption state. Private results now distinguish discovery, connect, handshake, read and validation stages; fixed failure codes are included without printing upstream messages or encryption keys. These changes need another hardware run. See [Bleak's client guidance](https://bleak.readthedocs.io/en/latest/api/client.html).
+The revised harness allows a 12-second BLUETTI discovery window, passes the discovered BLEDevice directly to the pinned upstream client (avoiding Bleak's implicit second scan), and exits failed sessions instead of letting upstream reconnect with old encryption state. Private results now distinguish discovery, connect, handshake, read and validation stages; fixed failure codes are included without printing upstream messages or encryption keys. A follow-up ten-minute run completed 8/8 reads for each device with no failures and at least 223 MiB available RAM. The new live service still needs its own sustained hardware test. See [Bleak's client guidance](https://bleak.readthedocs.io/en/latest/api/client.html).
 
 BLUETTI identity is selected by exact MAC address only: there is no generic model-name fallback. Set optional `bluetti_name` in the private device config to the complete name from your own scan for a second exact identity check. A mismatch aborts before creating a connection. The example identifier is deliberately fake. Real serial/name/MAC values remain on the Pi; the implementation must never select a neighbour's station just because its model matches.

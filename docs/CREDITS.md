@@ -1,6 +1,6 @@
 # Upstream credits
 
-This project's test harness calls these projects; it does not vendor their source.
+This project's live BLE workers and test harness call these projects; their library source is installed separately, not vendored here.
 
 * [JordiGrasvi/bluetti-elite200v2-mqtt](https://github.com/JordiGrasvi/bluetti-elite200v2-mqtt), MIT: Elite 200 V2 detection and MQTT bridge adaptation. Tested source revision: `50029b7ab059a854aa68dd36e59306f732e219b2`.
 * [nhurman/bluetti_mqtt](https://github.com/nhurman/bluetti_mqtt), MIT: newer protocol and Python BLE encryption implementation used by the Elite bridge.
