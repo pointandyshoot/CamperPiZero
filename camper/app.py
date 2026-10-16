@@ -2,10 +2,6 @@
 import argparse
 from collections import deque
 import contextlib
-import hashlib
-import hmac
-from http import HTTPStatus
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -13,6 +9,7 @@ from pathlib import Path
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -37,15 +34,7 @@ def load_config(path):
     config_check(cfg)
     if not cfg.get('bluetti_name'):
         raise ValueError('Full BLUETTI name is required for live control')
-    for key in ('auth_salt','auth_hash'):
-        if not isinstance(cfg.get(key),str) or len(cfg[key]) != {'auth_salt':32,'auth_hash':64}[key]:
-            raise ValueError('Missing web authentication; run the installer')
-        bytes.fromhex(cfg[key])
     return cfg
-
-
-def password_hash(password,salt):
-    return hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),200000).hex()
 
 
 def run_operation(device, config_path, base, stop, desired=None):
@@ -94,7 +83,6 @@ class Core:
         self.devices={d:{'data':None,'updated_mono':None,'failures':0,'error':None} for d in WORKER_LIMIT}
         self.jobs={};self.pending=deque();self.active=None;self.started=time.monotonic()
         self.last_aranet=None;self.clock_trusted=False
-        self.sessions={};self.login_attempts=deque(maxlen=100)
 
     def enqueue(self,desired):
         if type(desired) is not bool:raise ValueError('Boolean state required')
@@ -183,27 +171,6 @@ class Core:
                 'theme_artwork_available':[key for key,name in ARTWORK_FILES.items() if (THEME_ASSETS/name).is_file()],
                 'theme_labels':self.cfg.get('theme_labels',{'camper':'Camper','rose':'Rose','cyberpunk':'Cyberpunk'})}
 
-    def authenticate(self,password,address):
-        now=time.monotonic()
-        with self.condition:
-            while self.login_attempts and self.login_attempts[0][0]<now-60:self.login_attempts.popleft()
-            if sum(a==address for _,a in self.login_attempts)>=5:return None
-            self.login_attempts.append((now,address))
-        valid=hmac.compare_digest(password_hash(password,self.cfg['auth_salt']),self.cfg['auth_hash'])
-        if not valid:return None
-        with self.condition:
-            self.sessions={k:v for k,v in self.sessions.items() if v>now}
-            if len(self.sessions)>=32:self.sessions.pop(next(iter(self.sessions)))
-            token=secrets.token_urlsafe(32);self.sessions[token]=now+12*3600
-        return token
-
-    def authorised(self,cookie):
-        try:
-            parsed=SimpleCookie();parsed.load(cookie or '');token=parsed['camper_session'].value
-        except (KeyError,TypeError):return False
-        with self.condition:return self.sessions.get(token,0)>time.monotonic()
-
-
 class Server(ThreadingHTTPServer):
     daemon_threads=True
     request_queue_size=8
@@ -231,21 +198,34 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup();self.connection.settimeout(10)
     def log_message(self,*args):pass  # No identifiers, passwords, request bodies or session cookies in logs.
-    def send(self,status,payload,content_type='application/json',cookie=None):
+    def send(self,status,payload,content_type='application/json'):
         raw=json.dumps(payload,allow_nan=False).encode() if content_type=='application/json' else payload
         self.send_response(status);self.send_header('Content-Type',content_type);self.send_header('Content-Length',str(len(raw)))
         self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Referrer-Policy','no-referrer')
         self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
-        if cookie:self.send_header('Set-Cookie',cookie)
         self.end_headers();self.wfile.write(raw)
+    def valid_host(self):
+        # Do not resolve an untrusted Host: restrict it to this interface and hostname.
+        values=self.headers.get_all('Host',[])
+        if len(values)!=1:return False
+        try:
+            authority=urlsplit('http://'+values[0])
+            hostname=socket.gethostname().lower().rstrip('.')
+            allowed={self.connection.getsockname()[0],hostname,hostname+'.local','localhost'}
+            return (authority.hostname is not None and authority.hostname.lower().rstrip('.') in allowed
+                    and not authority.username and not authority.password and not authority.path
+                    and not authority.query and not authority.fragment
+                    and (authority.port or 80)==self.server.server_port)
+        except ValueError:return False
+
     def do_GET(self):
+        if not self.valid_host():return self.send(403,{'error':'Use the Pi hostname or local IP address'})
         path=urlsplit(self.path).path;core=self.server.core
         if path in ('/','/index.html','/style.css','/app.js'):
             name='index.html' if path=='/' else path[1:]
             mime={'index.html':'text/html; charset=utf-8','style.css':'text/css; charset=utf-8','app.js':'text/javascript; charset=utf-8'}[name]
             return self.send(200,(Path(__file__).resolve().parents[1]/'web'/name).read_bytes(),mime)
-        if not core.authorised(self.headers.get('Cookie')):return self.send(401,{'error':'Sign in required'})
         if path.startswith('/theme-assets/'):
             filename=path.removeprefix('/theme-assets/')
             if filename not in ARTWORK_FILES.values():return self.send(404,{'error':'Not found'})
@@ -261,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError,KeyError):return self.send(400,{'error':'Invalid history request'})
         return self.send(404,{'error':'Not found'})
     def do_POST(self):
+        if not self.valid_host():return self.send(403,{'error':'Use the Pi hostname or local IP address'})
         core=self.server.core
         if self.headers.get('Origin')!='http://'+self.headers.get('Host',''):
             return self.send(403,{'error':'Same-origin request required'})
@@ -271,13 +252,6 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data,dict):raise ValueError()
         except (ValueError,TypeError):return self.send(400,{'error':'Invalid request'})
         path=urlsplit(self.path).path
-        if path=='/api/login':
-            password=data.get('password')
-            if not isinstance(password,str) or len(password)>256:return self.send(400,{'error':'Invalid password'})
-            token=core.authenticate(password,self.client_address[0])
-            if token is None:return self.send(403,{'error':'Incorrect password or too many attempts. Wait one minute.'})
-            return self.send(200,{'ok':True},cookie=f'camper_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200')
-        if not core.authorised(self.headers.get('Cookie')):return self.send(401,{'error':'Sign in required'})
         if path=='/api/ac':
             try:return self.send(202,core.enqueue(data.get('on')))
             except ValueError:return self.send(400,{'error':'AC state must be boolean'})

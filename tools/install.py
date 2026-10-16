@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Install the local dashboard without modifying Wi-Fi, SSH or existing BLE environments."""
 import argparse
-import getpass
 import grp
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,19 +14,17 @@ import time
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from camper.app import load_config, password_hash
+from camper.app import load_config
 from tools.ble_soak import config_check
 
 PIN='50029b7ab059a854aa68dd36e59306f732e219b2'
 
 
-def prepare_config(source,existing,password=None):
+def prepare_config(source,existing):
     if existing.exists():
-        return load_config(existing),False  # Never reset an existing password/device config.
+        return load_config(existing),False  # Never overwrite existing private device configuration.
     cfg=json.loads(source.read_text());config_check(cfg)
     if not cfg.get('bluetti_name'):raise ValueError('Set the exact full bluetti_name first')
-    if not password or len(password)<12 or len(password)>256:raise ValueError('Use a dashboard password of 12–256 characters')
-    cfg['auth_salt']=os.urandom(16).hex();cfg['auth_hash']=password_hash(password,cfg['auth_salt'])
     cfg['theme_labels']={'camper':'Camper','rose':'Rose','cyberpunk':'Cyberpunk'}
     return cfg,True
 
@@ -118,11 +114,7 @@ def main():
             subprocess.run(['runuser','-u',args.user,'--',str(python),'-c',statement],env=env,check=True,timeout=40,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             freezes[name]=subprocess.check_output([str(python),'-m','pip','freeze'],text=True,timeout=30)
         if args.check:print('Preflight passed. No files or services changed.');return 0
-        password=None
-        if not existing.exists():
-            password=getpass.getpass('Choose a dashboard password (at least 12 characters): ')
-            if password!=getpass.getpass('Repeat dashboard password: '):raise ValueError('Passwords differ')
-        cfg,new=prepare_config(source,existing,password)
+        cfg,new=prepare_config(source,existing)
         if new:
             if any(not label or len(label)>32 or any(ord(c)<32 for c in label) for label in (args.rose_label,args.cyberpunk_label)):
                 raise ValueError('Theme labels must have 1–32 printable characters')

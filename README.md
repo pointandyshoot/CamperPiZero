@@ -15,9 +15,9 @@ sudo python3 tools/install.py --check
 sudo python3 tools/install.py
 ```
 
-Open **http://homeassistant.local:8080** or **http://192.168.42.1:8080** on the camper AP. Enter the dashboard password chosen during installation. The existing BLE environments and networking are preserved; no package changes/downloads occur. AC commands have priority and require read-back. DC shutdown is protected. Camper, Rose and Cyberpunk themes work locally; personal labels can be set in private configuration. No SDR is required. See [local themes and optional private artwork](docs/THEMES.md).
+Open **http://homeassistant.local:8080** or **http://192.168.42.1:8080** on the camper AP. No dashboard password is required: devices on the connected LAN can view readings and control AC. The existing BLE environments and networking are preserved; no package changes/downloads occur. AC commands have priority and require read-back. DC shutdown is protected. Camper, Rose and Cyberpunk themes work locally; personal labels can be set in private configuration. No SDR is required. See [local themes and optional private artwork](docs/THEMES.md).
 
-Read [installation and real-hardware acceptance](docs/INSTALL.md), [operation, updates and private backups](docs/OPERATIONS.md), and the [database decision](docs/DATABASE.md). Meshtastic is the next hardware-tested stage.
+Read [installation and real-hardware acceptance](docs/INSTALL.md), [operation, updates and private backups](docs/OPERATIONS.md), and the [database decision](docs/DATABASE.md). Meshtastic is the next hardware-tested stage. See the [mesh, weather and power-aware expansion plan](docs/EXPANSION.md).
 
 ## Thirty-minute read-only test
 

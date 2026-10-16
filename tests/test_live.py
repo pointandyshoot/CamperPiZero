@@ -14,13 +14,12 @@ import unittest
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from camper.app import Core, Server, password_hash, load_config, run_operation
+from camper.app import Core, Server, load_config, run_operation
 from camper.history import History
 from tools.install import prepare_config, unit_for, switch_release
 import ble_soak
 
-CONFIG={'bluetti_mac':'00:00:00:00:00:01','bluetti_name':'Elite 200 V20000000000000','smartbat_mac':'00:00:00:00:00:02','aranet_name':'Aranet4 DEMO','auth_salt':'00'*16}
-CONFIG['auth_hash']=password_hash('fake-example-password',CONFIG['auth_salt'])
+CONFIG={'bluetti_mac':'00:00:00:00:00:01','bluetti_name':'Elite 200 V20000000000000','smartbat_mac':'00:00:00:00:00:02','aranet_name':'Aranet4 DEMO'}
 DATA={'soc_percent':78,'solar_w':92,'ac_input_w':0,'ac_output_w':0,'dc_output_w':19,'ac_on':False,'dc_on':True}
 
 
@@ -74,10 +73,14 @@ class CoreTests(unittest.TestCase):
         snapshot=self.core.snapshot();self.assertIsNone(snapshot['devices']['bluetti']['data']);self.assertTrue(snapshot['devices']['bluetti']['stale'])
         self.core.devices['bluetti'].update(data=DATA,updated_mono=time.monotonic()-181)
         self.assertTrue(self.core.snapshot()['devices']['bluetti']['stale'])
-    def test_authentication_and_no_identifier_exposure(self):
-        self.assertIsNone(self.core.authenticate('wrong','test'))
-        token=self.core.authenticate('fake-example-password','test');self.assertTrue(self.core.authorised('camper_session='+token))
-        snapshot=json.dumps(self.core.snapshot());self.assertNotIn(CONFIG['bluetti_mac'],snapshot);self.assertNotIn(CONFIG['auth_hash'],snapshot)
+    def test_no_password_required_and_no_identifier_exposure(self):
+        self.assertEqual(load_config(self.config),CONFIG)
+        snapshot=json.dumps(self.core.snapshot())
+        self.assertNotIn(CONFIG['bluetti_mac'],snapshot)
+        self.assertNotIn(CONFIG['bluetti_name'],snapshot)
+        legacy={**CONFIG,'auth_salt':'legacy','auth_hash':'legacy'}
+        self.config.write_text(json.dumps(legacy))
+        self.assertEqual(load_config(self.config),legacy)
     def test_scheduler_confirms_commands_and_records_poll(self):
         def operation(device,path,base,stop,desired):
             return {'ok':True,'data':{**DATA,'ac_on':desired if desired is not None else False,'command_confirmed':True}}
@@ -90,36 +93,36 @@ class CoreTests(unittest.TestCase):
         with self.core.condition:self.core.condition.notify_all()
         thread.join(2);self.assertFalse(thread.is_alive());self.assertEqual(self.core.jobs[job['id']]['status'],'confirmed')
         self.assertTrue(self.core.snapshot()['devices']['bluetti']['data']['ac_on'])
-    def test_http_auth_csrf_control_and_absent_optional_hardware(self):
+    def test_http_lan_host_csrf_control_and_absent_optional_hardware(self):
         server=Server(('127.0.0.1',0),self.core);thread=threading.Thread(target=server.serve_forever);thread.start()
         host='127.0.0.1:'+str(server.server_port)
         conn=http.client.HTTPConnection(host,timeout=2)
         try:
-            conn.request('GET','/api/status');response=conn.getresponse();self.assertEqual(response.status,401);response.read()
-            body=json.dumps({'password':'fake-example-password'});headers={'Content-Type':'application/json','Origin':'http://'+host}
-            conn.request('GET','/theme-assets/power.webp');response=conn.getresponse();self.assertEqual(response.status,401);response.read()
-            conn.request('POST','/api/login',body,headers);response=conn.getresponse();self.assertEqual(response.status,200);cookie=response.getheader('Set-Cookie').split(';')[0];response.read();headers['Cookie']=cookie
-            conn.request('GET','/api/status',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,200);snapshot=json.loads(response.read());self.assertEqual(set(snapshot['devices']),{'bluetti','smartbat','aranet'})
+            headers={'Content-Type':'application/json','Origin':'http://'+host}
+            conn.request('GET','/api/status');response=conn.getresponse();self.assertEqual(response.status,200);snapshot=json.loads(response.read());self.assertEqual(set(snapshot['devices']),{'bluetti','smartbat','aranet'})
+            conn.request('GET','/api/status',headers={'Host':'other.example:'+str(server.server_port)});response=conn.getresponse();self.assertEqual(response.status,403);response.read()
+            conn.request('POST','/api/ac','{"on":true}',{**headers,'Host':'other.example:'+str(server.server_port),'Origin':'http://other.example:'+str(server.server_port)});response=conn.getresponse();self.assertEqual(response.status,403);response.read()
+            conn.request('POST','/api/login','{}',headers);response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/ac','{"on":true}',{**headers,'Origin':'http://other.example'});response=conn.getresponse();self.assertEqual(response.status,403);response.read()
             with patch('camper.app.THEME_ASSETS',self.path/'art'):
                 art=self.path/'art';art.mkdir();(art/'power.webp').write_bytes(b'example-webp')
                 self.assertEqual(self.core.snapshot()['theme_artwork_available'],['power'])
-                conn.request('GET','/theme-assets/power.webp',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,200);self.assertEqual(response.getheader('Content-Type'),'image/webp');self.assertEqual(response.read(),b'example-webp')
-                conn.request('GET','/theme-assets/../config.json',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,404);response.read()
-                conn.request('GET','/theme-assets/air.webp',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,404);response.read()
+                conn.request('GET','/theme-assets/power.webp');response=conn.getresponse();self.assertEqual(response.status,200);self.assertEqual(response.getheader('Content-Type'),'image/webp');self.assertEqual(response.read(),b'example-webp')
+                conn.request('GET','/theme-assets/../config.json');response=conn.getresponse();self.assertEqual(response.status,404);response.read()
+                conn.request('GET','/theme-assets/air.webp');response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/dc','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/ac','{"on":true}',headers);response=conn.getresponse();self.assertEqual(response.status,202);self.assertEqual(json.loads(response.read())['status'],'queued')
             conn.request('POST','/api/ac','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,409);response.read()
-            conn.request('GET','/api/history?metric=bad&hours=24',headers={'Cookie':cookie});response=conn.getresponse();self.assertEqual(response.status,400);response.read()
-            conn.request('GET','/');response=conn.getresponse();html=response.read().decode();self.assertNotIn('Mock data',html);self.assertIn('DC-off protected',html)
+            conn.request('GET','/api/history?metric=bad&hours=24');response=conn.getresponse();self.assertEqual(response.status,400);response.read()
+            conn.request('GET','/');response=conn.getresponse();html=response.read().decode();self.assertNotIn('Mock data',html);self.assertNotIn('login-form',html);self.assertIn('DC-off protected',html)
         finally:conn.close();server.shutdown();thread.join();server.server_close()
     def test_missing_secrets_and_repeat_config_preserved(self):
         self.config.write_text('{}')
         with self.assertRaises(ValueError):load_config(self.config)
-        self.config.write_text(json.dumps(CONFIG));cfg,new=prepare_config(self.path/'does-not-exist',self.config,'different-password')
+        self.config.write_text(json.dumps(CONFIG));cfg,new=prepare_config(self.path/'does-not-exist',self.config)
         self.assertFalse(new);self.assertEqual(cfg,CONFIG)
-        cfg,new=prepare_config(self.config,self.path/'new-config','new-example-password')
-        self.assertTrue(new);self.assertEqual(cfg['bluetti_mac'],CONFIG['bluetti_mac']);self.assertNotIn('new-example-password',json.dumps(cfg))
+        cfg,new=prepare_config(self.config,self.path/'new-config')
+        self.assertTrue(new);self.assertEqual(cfg['bluetti_mac'],CONFIG['bluetti_mac']);self.assertNotIn('auth_hash',cfg)
     def test_hard_worker_deadline_reaps_process(self):
         base=self.path;python=base/'venv/bin/python';python.parent.mkdir(parents=True);python.symlink_to(sys.executable)
         fake=base/'worker.py';fake.write_text('import time; time.sleep(20)')
