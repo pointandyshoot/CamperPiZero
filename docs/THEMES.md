@@ -1,6 +1,6 @@
 # Local display themes
 
-Camper, Rose and Cyberpunk are CSS themes, remembered in each browser's local storage. Optional personal labels live only in the installed private config. The Rose theme uses a pastel plaid accent, clear plum text and small decorative artwork slots for power, solar and environmental monitoring.
+Camper, Rose and Cyberpunk are CSS themes, remembered in each browser's local storage. Choose them under the bottom **Settings** tab, in Display settings; they no longer occupy the top of Overview. Optional personal labels live only in the installed private config. The Rose theme uses a pastel plaid accent, clear plum text and small decorative artwork slots for power, solar and environmental monitoring.
 
 Personalised artwork is deliberately not bundled in the public repository. An optional private theme pack can install `power.webp`, `solar.webp` and `air.webp` under `/etc/camper-zero/theme-assets/`. Keep the directory accessible to the service user's group (750) and files readable by that group (640), with root ownership. The private pack installer handles these permissions. Use only trusted local artwork.
 

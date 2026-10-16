@@ -113,6 +113,11 @@ class CoreTests(unittest.TestCase):
             conn.request('POST','/api/dc','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,404);response.read()
             conn.request('POST','/api/ac','{"on":true}',headers);response=conn.getresponse();self.assertEqual(response.status,202);self.assertEqual(json.loads(response.read())['status'],'queued')
             conn.request('POST','/api/ac','{"on":false}',headers);response=conn.getresponse();self.assertEqual(response.status,409);response.read()
+            self.core.history.record('aranet',{'temperature_c':25.7},time.time()-120,True)
+            conn.request('GET','/api/history?metric=aranet.temperature_c&hours=1');response=conn.getresponse();self.assertEqual(response.status,200);chart=json.loads(response.read())
+            self.assertEqual(chart['bucket_seconds'],60);self.assertEqual(len(chart['points']),60)
+            samples=[p for p in chart['points'] if p['count']]
+            self.assertEqual(len(samples),1);self.assertAlmostEqual(samples[0]['mean'],25.7)
             conn.request('GET','/api/history?metric=bad&hours=24');response=conn.getresponse();self.assertEqual(response.status,400);response.read()
             conn.request('GET','/');response=conn.getresponse();html=response.read().decode();self.assertNotIn('Mock data',html);self.assertNotIn('login-form',html);self.assertIn('DC-off protected',html)
         finally:conn.close();server.shutdown();thread.join();server.server_close()

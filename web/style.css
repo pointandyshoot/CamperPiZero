@@ -50,3 +50,9 @@ html[data-theme=rose] .solar-card:has(.theme-art:not([hidden])) .metric-foot{cle
 html[data-theme=rose] .art-air{position:absolute;right:22px;top:59px;width:86px;height:111px}
 html[data-theme=rose] .environment:has(.theme-art:not([hidden])) .air-main{padding-right:95px;min-height:104px;flex-direction:column;align-items:flex-start;gap:8px;justify-content:center}
 @media(max-width:360px){html[data-theme=rose] .art-power{width:72px;height:65px}html[data-theme=rose] .art-solar{width:70px;height:66px}html[data-theme=rose] .art-air{width:73px;right:16px}html[data-theme=rose] .environment:has(.theme-art:not([hidden])) .air-main{padding-right:80px}}
+
+/* Display choices live in Settings, away from the primary power controls. */
+.display-card .theme-bar{flex-wrap:wrap;padding:8px 0 16px;gap:8px}
+.display-card .theme-bar>span{flex-basis:100%;margin-bottom:2px}
+.display-card .theme-bar button{min-height:44px}
+@media(max-width:400px){.chart-heading{align-items:flex-start;flex-wrap:wrap;gap:14px}}

@@ -236,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             query=parse_qs(urlsplit(self.path).query)
             try:
                 metric=query['metric'][0];hours=int(query.get('hours',['24'])[0])
-                if metric not in METRICS or hours not in (24,168,720,2160,17520):raise ValueError()
+                if metric not in METRICS or hours not in (1,24,168,720,2160,17520):raise ValueError()
                 end=int(time.time());return self.send(200,core.history.chart(metric,end-hours*3600,end))
             except (ValueError,KeyError):return self.send(400,{'error':'Invalid history request'})
         return self.send(404,{'error':'Not found'})
